@@ -1,0 +1,4 @@
+<resources>
+    <style name="Theme.Diary" parent="android:Theme.Material.Light.NoActionBar" />
+    <color name="ic_bg">#2F5BEA</color>
+</resources>
