@@ -4,13 +4,33 @@ import android.content.Context
 import androidx.compose.ui.graphics.Color
 import org.json.JSONObject
 
-data class Lesson(val name: String, val room: String)
+data class Lesson(val name: String, val room: String, val teacher: String = "")
 data class Hw(val text: String, val done: Boolean)
 
 val DAYS = listOf("Понедельник", "Вторник", "Среда", "Четверг", "Пятница")
 val SHORT = listOf("Пн", "Вт", "Ср", "Чт", "Пт")
 
-private fun l(name: String, room: String = "") = Lesson(name, room)
+val TEACHERS = mapOf(
+    "География" to "Анна Николаевна",
+    "История" to "Дмитрий Владимирович",
+    "Алгебра" to "Екатерина Дмитриевна",
+    "Русский язык" to "Наталья Борисовна",
+    "Физика" to "Татьяна Леонидовна",
+    "Труд (технология)" to "Татьяна Алексеевна",
+    "Физическая культура" to "Денис Вячеславович",
+    "Биология" to "Анна Игоревна",
+    "Ин.яз. (англ.)" to "Анастасия Юрьевна",
+    "Математика" to "Екатерина Дмитриевна",
+    "Химия" to "Наталья Николаевна",
+    "Информатика" to "Ирина Тодосевна",
+    "Геометрия" to "Екатерина Дмитриевна",
+    "Вероятность и статистика" to "Екатерина Дмитриевна",
+    "Литература" to "Наталья Борисовна",
+    "ОБЗР" to "Дмитрий Владимирович",
+    "Музыка" to "Мария Анатольевна"
+)
+
+private fun l(name: String, room: String = "") = Lesson(name, room, TEACHERS[name] ?: "")
 
 val SCHEDULE: List<List<Lesson>> = listOf(
     listOf(

@@ -24,6 +24,10 @@ import androidx.compose.ui.unit.*
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.time.temporal.ChronoUnit
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -143,7 +147,8 @@ fun App(store: Store) {
         Box(Modifier.weight(1f)) {
             when (tab) {
                 0 -> ScheduleScreen(t, glass, len, now, hw, save)
-                1 -> TasksScreen(t, glass, hw, save)
+                1 -> CalendarScreen(t, glass, len, now)
+                2 -> TasksScreen(t, glass, hw, save)
                 else -> SettingsScreen(
                     t, glass, len,
                     onTheme = { themeId = it; store.theme = it },
@@ -163,7 +168,8 @@ fun BottomBar(t: AppTheme, glass: Boolean, tab: Int, onTab: (Int) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         val items = listOf(
-            "Расписание" to Icons.Default.DateRange,
+            "Уроки" to Icons.Default.Home,
+            "Календарь" to Icons.Default.DateRange,
             "Задания" to Icons.Default.CheckCircle,
             "Настройки" to Icons.Default.Settings
         )
@@ -189,12 +195,12 @@ fun BottomBar(t: AppTheme, glass: Boolean, tab: Int, onTab: (Int) -> Unit) {
 
 class Hero(val kicker: String, val title: String, val sub: String, val cur: Int, val pos: Float?)
 
-fun heroState(day: Int, today: Int, len: Int, m: Int): Hero {
+fun heroState(day: Int, today: Int, len: Int, m: Int, off: String): Hero {
     val ls = SCHEDULE[day]
     val a = slot(0, len).first
     val z = slot(ls.size - 1, len).second
     if (day != today) {
-        val k = if (today < 0) "Сегодня выходной, дальше понедельник" else "Выбранный день"
+        val k = if (today < 0) off else "Выбранный день"
         return Hero(k, DAYS[day], "${ls.size} уроков, с ${fmt(a)} до ${fmt(z)}", -1, null)
     }
     val cur = ls.indices.firstOrNull { m >= slot(it, len).first && m < slot(it, len).second } ?: -1
@@ -226,14 +232,21 @@ fun ScheduleScreen(
     t: AppTheme, glass: Boolean, len: Int, now: Calendar,
     hw: SnapshotStateMap<String, Hw>, save: () -> Unit
 ) {
-    val dow = now.get(Calendar.DAY_OF_WEEK)
-    val today = if (dow in Calendar.MONDAY..Calendar.FRIDAY) dow - Calendar.MONDAY else -1
+    val ld = LocalDate.of(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1, now.get(Calendar.DAY_OF_MONTH))
+    val info = dayInfo(ld)
+    val today = if (info.kind == Kind.SCHOOL) ld.dayOfWeek.value - 1 else -1
+    val off = when (info.kind) {
+        Kind.VACATION -> info.title
+        Kind.OFF -> "Выходной: ${info.title}"
+        Kind.WEEKEND -> "Сегодня выходной"
+        else -> "Вне учебного года"
+    }
     var day by remember { mutableIntStateOf(if (today < 0) 0 else today) }
     var opened by remember { mutableStateOf<String?>(null) }
     val m = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
     val date = SimpleDateFormat("EEEE, d MMMM", Locale.forLanguageTag("ru"))
         .format(now.time).replaceFirstChar { it.uppercase() }
-    val h = heroState(day, today, len, m)
+    val h = heroState(day, today, len, m, off)
 
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
@@ -342,6 +355,7 @@ fun LessonCard(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Tx(lsn.name, t.ink, 16.sp, FontWeight.SemiBold)
+                if (lsn.teacher.isNotEmpty()) Tx(lsn.teacher, t.muted, 13.sp)
                 if (v != null && v.text.isNotBlank()) {
                     Tx(if (v.done) "ДЗ сделано" else "Есть ДЗ", t.accent, 13.sp)
                 }
@@ -540,5 +554,153 @@ fun SettingsScreen(
                 )
             )
         }
+    }
+}
+
+
+// ---------- календарь ----------
+
+private val MON = listOf("янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек")
+private val RU = Locale.forLanguageTag("ru")
+private val OFF_COLOR = Color(0xFFE5484D)
+private val VAC_COLOR = Color(0xFF2FB872)
+
+private fun dm(d: LocalDate) = "${d.dayOfMonth} ${MON[d.monthValue - 1]}"
+private fun rng(a: LocalDate, b: LocalDate) = if (a == b) dm(a) else "${dm(a)} – ${dm(b)}"
+
+@Composable
+fun CalendarScreen(t: AppTheme, glass: Boolean, len: Int, now: Calendar) {
+    val today = LocalDate.of(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1, now.get(Calendar.DAY_OF_MONTH))
+    val firstMonth = YEAR_START.withDayOfMonth(1)
+    val lastMonth = YEAR_END.withDayOfMonth(1)
+    val startMonth = today.withDayOfMonth(1).let {
+        if (it.isBefore(firstMonth)) firstMonth else if (it.isAfter(lastMonth)) lastMonth else it
+    }
+    var month by remember { mutableStateOf(startMonth) }
+    var sel by remember { mutableStateOf(today) }
+    val shape = RoundedCornerShape(18.dp)
+
+    Column(
+        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Tx("Календарь", t.ink, 28.sp, FontWeight.Bold)
+
+        val prevOk = month.isAfter(firstMonth)
+        val nextOk = month.isBefore(lastMonth)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Tx(
+                "‹", if (prevOk) t.ink else t.muted.copy(alpha = .35f), 30.sp, FontWeight.Bold,
+                Modifier.clip(CircleShape).clickable(enabled = prevOk) { month = month.minusMonths(1) }
+                    .padding(horizontal = 18.dp, vertical = 2.dp)
+            )
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                val name = month.month.getDisplayName(TextStyle.FULL_STANDALONE, RU)
+                    .replaceFirstChar { it.uppercase() }
+                Tx("$name ${month.year}", t.ink, 18.sp, FontWeight.SemiBold)
+            }
+            Tx(
+                "›", if (nextOk) t.ink else t.muted.copy(alpha = .35f), 30.sp, FontWeight.Bold,
+                Modifier.clip(CircleShape).clickable(enabled = nextOk) { month = month.plusMonths(1) }
+                    .padding(horizontal = 18.dp, vertical = 2.dp)
+            )
+        }
+
+        Row(Modifier.fillMaxWidth()) {
+            listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс").forEach { w ->
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Tx(w, t.muted, 13.sp, FontWeight.Medium)
+                }
+            }
+        }
+
+        val lead = month.dayOfWeek.value - 1
+        val dim = month.lengthOfMonth()
+        val rows = (lead + dim + 6) / 7
+        Column(Modifier.fillMaxWidth().panel(t, glass, shape).padding(6.dp)) {
+            for (r in 0 until rows) {
+                Row(Modifier.fillMaxWidth()) {
+                    for (c in 0 until 7) {
+                        val n = r * 7 + c - lead + 1
+                        if (n < 1 || n > dim) {
+                            Spacer(Modifier.weight(1f).aspectRatio(1f))
+                        } else {
+                            val date = month.withDayOfMonth(n)
+                            val info = dayInfo(date)
+                            val bg = when (info.kind) {
+                                Kind.SCHOOL -> t.accent.copy(alpha = .14f)
+                                Kind.VACATION -> VAC_COLOR.copy(alpha = .30f)
+                                Kind.OFF -> OFF_COLOR.copy(alpha = .30f)
+                                else -> Color.Transparent
+                            }
+                            val ring = when {
+                                date == today -> t.accent
+                                date == sel -> t.ink
+                                else -> Color.Transparent
+                            }
+                            val cell = RoundedCornerShape(12.dp)
+                            Box(
+                                Modifier.weight(1f).aspectRatio(1f).padding(2.dp)
+                                    .clip(cell).background(bg).border(2.dp, ring, cell)
+                                    .clickable { sel = date },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val dim2 = info.kind == Kind.WEEKEND || info.kind == Kind.OUT
+                                Tx(
+                                    "$n", if (dim2) t.muted else t.ink, 15.sp,
+                                    if (date == today) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            listOf(
+                t.accent.copy(alpha = .35f) to "Уроки",
+                VAC_COLOR.copy(alpha = .6f) to "Каникулы",
+                OFF_COLOR.copy(alpha = .6f) to "Праздник"
+            ).forEach { (c, s) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(12.dp).clip(CircleShape).background(c))
+                    Spacer(Modifier.width(6.dp))
+                    Tx(s, t.muted, 13.sp)
+                }
+            }
+        }
+
+        val info = dayInfo(sel)
+        val dateText = sel.format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", RU))
+            .replaceFirstChar { it.uppercase() }
+        Column(Modifier.fillMaxWidth().panel(t, glass, shape).padding(16.dp)) {
+            Tx(dateText, t.muted, 14.sp)
+            Tx(info.title, t.ink, 20.sp, FontWeight.Bold, Modifier.padding(top = 4.dp))
+            if (info.kind == Kind.SCHOOL) {
+                val n = SCHEDULE[sel.dayOfWeek.value - 1].size
+                Tx(
+                    "$n уроков, с ${fmt(slot(0, len).first)} до ${fmt(slot(n - 1, len).second)}",
+                    t.ink, m = Modifier.padding(top = 4.dp)
+                )
+            }
+            if (info.note.isNotEmpty()) Tx(info.note, t.muted, 14.sp, m = Modifier.padding(top = 4.dp))
+        }
+
+        Tx("Ближайшие каникулы и выходные", t.muted, 14.sp, FontWeight.SemiBold, Modifier.padding(top = 8.dp))
+        val upcoming = (VACATIONS + OFF_DAYS).filter { !it.to.isBefore(today) }.sortedBy { it.from }.take(6)
+        upcoming.forEach { e ->
+            val lbl = if (e.has(today)) "идёт сейчас" else "через ${ChronoUnit.DAYS.between(today, e.from)} дн."
+            Column(Modifier.fillMaxWidth().panel(t, glass, shape).padding(14.dp)) {
+                Tx(e.title + if (e.prelim) " (предв.)" else "", t.ink, 16.sp, FontWeight.SemiBold)
+                Tx("${rng(e.from, e.to)}, $lbl", t.muted, 14.sp)
+            }
+        }
+
+        Tx(
+            "Каникулы даны по рекомендациям Минпросвещения РФ, которым следует Крым, школа может сдвинуть даты. " +
+                "Региональные выходные Крыма на 2027 год пока предварительные.",
+            t.muted, 12.sp, m = Modifier.padding(top = 4.dp)
+        )
     }
 }
