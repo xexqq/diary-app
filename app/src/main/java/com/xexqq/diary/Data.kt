@@ -1,11 +1,12 @@
 package com.xexqq.diary
 
 import android.content.Context
+import java.time.LocalDate
+import java.time.LocalTime
 import androidx.compose.ui.graphics.Color
 import org.json.JSONObject
 
 data class Lesson(val name: String, val room: String, val teacher: String = "")
-data class Hw(val text: String, val done: Boolean)
 
 val DAYS = listOf("Понедельник", "Вторник", "Среда", "Четверг", "Пятница")
 val SHORT = listOf("Пн", "Вт", "Ср", "Чт", "Пт")
@@ -118,6 +119,41 @@ val THEMES = listOf(
     )
 )
 
+/** Правка конкретного урока на конкретную дату: отмена, замена, задание, заметка. */
+data class Edit(
+    val cancel: Boolean = false,
+    val subject: String = "",
+    val teacher: String = "",
+    val room: String = "",
+    val hw: String = "",
+    val done: Boolean = false,
+    val note: String = ""
+) {
+    val empty: Boolean
+        get() = !cancel && subject.isEmpty() && teacher.isEmpty() && room.isEmpty() && hw.isEmpty() && note.isEmpty()
+}
+
+fun ekey(d: LocalDate, i: Int) = "$d:$i"
+
+/** Урок с учётом правки. */
+fun effective(base: Lesson, e: Edit?): Lesson {
+    if (e == null) return base
+    val name = e.subject.ifEmpty { base.name }
+    val teacher = when {
+        e.teacher.isNotEmpty() -> e.teacher
+        e.subject.isNotEmpty() && e.subject != base.name -> TEACHERS[e.subject] ?: ""
+        else -> base.teacher
+    }
+    return Lesson(name, e.room.ifEmpty { base.room }, teacher)
+}
+
+data class Clock(val date: LocalDate, val minutes: Int)
+
+fun nowClock(): Clock {
+    val t = LocalTime.now()
+    return Clock(LocalDate.now(), t.hour * 60 + t.minute)
+}
+
 class Store(ctx: Context) {
     private val p = ctx.getSharedPreferences("diary", Context.MODE_PRIVATE)
 
@@ -133,19 +169,47 @@ class Store(ctx: Context) {
         get() = p.getBoolean("glass", false)
         set(v) { p.edit().putBoolean("glass", v).apply() }
 
-    fun loadHw(): Map<String, Hw> {
-        val o = JSONObject(p.getString("hw", "{}") ?: "{}")
-        val out = HashMap<String, Hw>()
+    fun loadEdits(): Map<String, Edit> {
+        val out = HashMap<String, Edit>()
+        val o = JSONObject(p.getString("edits", "{}") ?: "{}")
         for (k in o.keys()) {
             val j = o.getJSONObject(k)
-            out[k] = Hw(j.getString("t"), j.getBoolean("d"))
+            out[k] = Edit(
+                j.optBoolean("c"), j.optString("s"), j.optString("t"), j.optString("r"),
+                j.optString("h"), j.optBoolean("d"), j.optString("n")
+            )
+        }
+        // Перенос заданий из прошлой версии: привязываем к ближайшей дате этого дня недели
+        val old = p.getString("hw", null)
+        if (old != null) {
+            val oo = JSONObject(old)
+            for (k in oo.keys()) {
+                val parts = k.split("-")
+                if (parts.size != 2) continue
+                val wd = parts[0].toIntOrNull() ?: continue
+                val idx = parts[1].toIntOrNull() ?: continue
+                if (wd !in 0..4 || idx !in 0..6) continue
+                val j = oo.getJSONObject(k)
+                var dt = LocalDate.now()
+                while (dt.dayOfWeek.value != wd + 1) dt = dt.plusDays(1)
+                val key = ekey(dt, idx)
+                if (!out.containsKey(key)) out[key] = Edit(hw = j.optString("t"), done = j.optBoolean("d"))
+            }
+            p.edit().remove("hw").apply()
+            saveEdits(out)
         }
         return out
     }
 
-    fun saveHw(m: Map<String, Hw>) {
+    fun saveEdits(m: Map<String, Edit>) {
         val o = JSONObject()
-        for ((k, v) in m) o.put(k, JSONObject().put("t", v.text).put("d", v.done))
-        p.edit().putString("hw", o.toString()).apply()
+        for ((k, v) in m) {
+            o.put(
+                k,
+                JSONObject().put("c", v.cancel).put("s", v.subject).put("t", v.teacher)
+                    .put("r", v.room).put("h", v.hw).put("d", v.done).put("n", v.note)
+            )
+        }
+        p.edit().putString("edits", o.toString()).apply()
     }
 }

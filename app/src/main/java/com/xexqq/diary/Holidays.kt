@@ -2,6 +2,8 @@ package com.xexqq.diary
 
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 class Span(
     val from: LocalDate,
@@ -94,3 +96,14 @@ fun dayInfo(day: LocalDate): DayInfo {
     val q = QUARTERS.firstOrNull { it.has(day) }?.title ?: ""
     return DayInfo(Kind.SCHOOL, "Учебный день", q)
 }
+
+val RU: Locale = Locale.forLanguageTag("ru")
+val FULL_DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE, d MMMM", RU)
+
+fun dateLabel(d: LocalDate) = d.format(FULL_DAY).replaceFirstChar { it.uppercase() }
+
+private val MON = listOf("янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек")
+
+fun dm(d: LocalDate) = "${d.dayOfMonth} ${MON[d.monthValue - 1]}"
+
+fun rng(a: LocalDate, b: LocalDate) = if (a == b) dm(a) else "${dm(a)} – ${dm(b)}"
