@@ -255,7 +255,7 @@ fun Tag(text: String, c: Color) = Tx(
 fun LessonCard(
     i: Int, base: Lesson, eff: Lesson, e: Edit?, start: Int, end: Int, isNow: Boolean,
     editMode: Boolean, expanded: Boolean, onClick: () -> Unit, onCheck: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    onBook: (() -> Unit)?, modifier: Modifier = Modifier
 ) {
     val t = LocalT.current
     val shape = RoundedCornerShape(18.dp)
@@ -328,6 +328,13 @@ fun LessonCard(
                 if (hw.isEmpty() && note.isEmpty()) {
                     Tx("Заданий и заметок нет. Чтобы добавить, нажми на карандаш вверху.", t.muted, 14.sp)
                 }
+                if (onBook != null) {
+                    Tx(
+                        "Открыть учебник", t.onAccent, 15.sp, FontWeight.SemiBold,
+                        Modifier.padding(top = 4.dp).bounceClick(onClick = onBook).clip(RoundedCornerShape(50))
+                            .background(t.accent).padding(horizontal = 18.dp, vertical = 10.dp)
+                    )
+                }
             }
         }
     }
@@ -335,7 +342,7 @@ fun LessonCard(
 
 fun LazyListScope.lessonItems(
     date: LocalDate, info: DayInfo, len: Int, clock: Clock, edits: SnapshotStateMap<String, Edit>,
-    editMode: Boolean, opened: Int?, onOpen: (Int?) -> Unit, onEdit: (Int) -> Unit,
+    editMode: Boolean, opened: Int?, onOpen: (Int?) -> Unit, onEdit: (Int) -> Unit, onBook: (String) -> Unit,
     onCheck: (String, Edit) -> Unit
 ) {
     if (info.kind != Kind.SCHOOL) {
@@ -353,6 +360,7 @@ fun LazyListScope.lessonItems(
             i, b, eff, e, s, en, isNow, editMode, opened == i,
             onClick = { if (editMode) onEdit(i) else onOpen(if (opened == i) null else i) },
             onCheck = { if (e != null) onCheck(key, e.copy(done = it)) },
+            onBook = if (noBook(eff.name)) null else ({ onBook(eff.name) }),
             modifier = Modifier.appear(i, date)
         )
     }
@@ -460,7 +468,7 @@ fun EditDialog(
 fun ScheduleScreen(
     clock: Clock, len: Int, weekOffset: Int, onWeek: (Int) -> Unit, day: Int, onDay: (Int) -> Unit,
     edits: SnapshotStateMap<String, Edit>, editMode: Boolean, onExitEdit: () -> Unit,
-    commit: (String, Edit?) -> Unit
+    onBook: (String) -> Unit, commit: (String, Edit?) -> Unit
 ) {
     val wide = LocalWide.current
     val monday = remember(clock.date, weekOffset) {
@@ -494,7 +502,7 @@ fun ScheduleScreen(
                 ) {
                     lessonItems(
                         date, info, len, clock, edits, editMode, opened,
-                        { opened = it }, { editing = it }
+                        { opened = it }, { editing = it }, onBook
                     ) { k, e -> commit(k, e) }
                 }
             }
@@ -510,7 +518,7 @@ fun ScheduleScreen(
                 if (editMode) item(key = "banner") { EditBanner(onExitEdit, Modifier.animateItem()) }
                 lessonItems(
                     date, info, len, clock, edits, editMode, opened,
-                    { opened = it }, { editing = it }
+                    { opened = it }, { editing = it }, onBook
                 ) { k, e -> commit(k, e) }
             }
         }

@@ -59,7 +59,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.platform.LocalContext
+import androidx.documentfile.provider.DocumentFile
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 class MainActivity : ComponentActivity() {
@@ -91,6 +104,76 @@ fun App(store: Store, resumeKey: Int) {
     var weekOffset by rememberSaveable { mutableStateOf(if (weekend) 1 else 0) }
     var day by rememberSaveable { mutableStateOf(if (weekend) 0 else start.dayOfWeek.value - 1) }
     val edits = remember { mutableStateMapOf<String, Edit>().apply { putAll(store.loadEdits()) } }
+
+    // Учебники
+    val ctx = LocalContext.current
+    val books = remember { mutableStateListOf<Book>() }
+    var folder by remember { mutableStateOf(store.booksFolder) }
+    var folderName by remember { mutableStateOf<String?>(null) }
+    val overrides = remember { mutableStateMapOf<String, String>().apply { putAll(store.loadBookMap()) } }
+    var reader by remember { mutableStateOf<Book?>(null) }
+    var bookAsk by remember { mutableStateOf<BookAsk?>(null) }
+    var pendingSubject by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(folder) {
+        books.clear()
+        val f = folder
+        if (f == null) {
+            folderName = null
+        } else {
+            val res = withContext(Dispatchers.IO) {
+                try {
+                    val u = Uri.parse(f)
+                    Pair(DocumentFile.fromTreeUri(ctx, u)?.name ?: "", scanPdfs(ctx, u))
+                } catch (e: Exception) {
+                    Pair("", emptyList<Book>())
+                }
+            }
+            folderName = res.first
+            books.addAll(res.second)
+        }
+    }
+
+    val folderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            try {
+                ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: Exception) {
+            }
+            store.booksFolder = uri.toString()
+            folder = uri.toString()
+            bookAsk = null
+        }
+    }
+    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val subj = pendingSubject
+        if (uri != null && subj != null) {
+            try {
+                ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: Exception) {
+            }
+            overrides[subj] = uri.toString()
+            store.saveBookMap(overrides.toMap())
+            bookAsk = null
+            reader = Book(Uri.decode(uri.lastPathSegment ?: "PDF").substringAfterLast('/'), uri, "")
+        }
+    }
+
+    val openBook: (String) -> Unit = { subject ->
+        pendingSubject = subject
+        val list = booksFor(subject, books, overrides)
+        if (list.size == 1) {
+            reader = list[0]
+        } else if (list.size > 1) {
+            bookAsk = BookAsk(subject, list, 2)
+        } else if (folder == null) {
+            bookAsk = BookAsk(subject, emptyList(), 0)
+        } else {
+            bookAsk = BookAsk(subject, emptyList(), 1)
+        }
+    }
+
+    BackHandler(enabled = reader != null) { reader = null }
 
     // Часы обновляются раз в минуту и при возврате в приложение
     val clock by produceState(nowClock(), resumeKey) {
@@ -150,7 +233,7 @@ fun App(store: Store, resumeKey: Int) {
                         when (s) {
                             0 -> ScheduleScreen(
                                 clock, len, weekOffset, { weekOffset = it }, day, { day = it },
-                                edits, editMode, { editMode = false }, commit
+                                edits, editMode, { editMode = false }, openBook, commit
                             )
                             1 -> CalendarScreen(len, clock)
                             2 -> TasksScreen(
@@ -163,7 +246,8 @@ fun App(store: Store, resumeKey: Int) {
                                 }
                             )
                             else -> SettingsScreen(
-                                len, glassOn,
+                                len, glassOn, folderName, books.size, missingSubjects(books, overrides),
+                                { folderLauncher.launch(null) },
                                 onTheme = { themeId = it; store.theme = it },
                                 onLen = { len = it; store.len = it },
                                 onGlass = { glassOn = it; store.glass = it }
@@ -173,6 +257,32 @@ fun App(store: Store, resumeKey: Int) {
                 }
                 BottomBar(if (settings) -1 else tab) { tab = it; settings = false }
             }
+
+            AnimatedContent(
+                targetState = reader,
+                modifier = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    (slideInVertically(tween(320)) { it / 5 } + fadeIn(tween(260))) togetherWith
+                        (slideOutVertically(tween(260)) { it / 5 } + fadeOut(tween(200)))
+                },
+                label = "reader"
+            ) { b ->
+                if (b != null) {
+                    val key = b.uri.toString()
+                    ReaderScreen(b, store.pdfPage(key), { store.setPdfPage(key, it) }, { reader = null })
+                }
+            }
+        }
+
+        val ask = bookAsk
+        if (ask != null) {
+            BookDialog(
+                ask,
+                onPickFolder = { folderLauncher.launch(null) },
+                onPickFile = { fileLauncher.launch(arrayOf("application/pdf")) },
+                onOpen = { b -> bookAsk = null; reader = b },
+                onDismiss = { bookAsk = null }
+            )
         }
     }
 }

@@ -304,7 +304,8 @@ fun TasksScreen(clock: Clock, edits: SnapshotStateMap<String, Edit>, onToggle: (
 
 @Composable
 fun SettingsScreen(
-    len: Int, glassOn: Boolean,
+    len: Int, glassOn: Boolean, folderName: String?, count: Int, missing: List<String>,
+    onPickFolder: () -> Unit,
     onTheme: (String) -> Unit, onLen: (Int) -> Unit, onGlass: (Boolean) -> Unit
 ) {
     val t = LocalT.current
@@ -370,6 +371,31 @@ fun SettingsScreen(
                     Tx("Стеклянные панели, блики и цветной фон", t.muted, 13.sp)
                 }
                 Switch(checked = glassOn, onCheckedChange = onGlass, colors = switchColors())
+            }
+
+            Tx("Учебники", t.muted, 14.sp, FontWeight.SemiBold, Modifier.padding(top = 8.dp))
+            Column(
+                Modifier.fillMaxWidth().appear(5).panel(shape).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Tx("Папка с PDF-учебниками", t.ink, 16.sp, FontWeight.SemiBold)
+                        Tx(
+                            if (folderName == null) "не выбрана" else "$folderName, найдено PDF: $count",
+                            t.muted, 13.sp
+                        )
+                    }
+                    DlgBtn("Выбрать", t.onAccent, t.accent, onPickFolder)
+                }
+                if (folderName != null) {
+                    if (missing.isEmpty()) {
+                        Tx("Все учебники на месте", t.muted, 14.sp)
+                    } else {
+                        Tx("Не хватает учебников:", t.ink, 14.sp, FontWeight.SemiBold)
+                        Tx(missing.joinToString(", "), t.muted, 14.sp)
+                    }
+                }
             }
         }
     }

@@ -212,4 +212,27 @@ class Store(ctx: Context) {
         }
         p.edit().putString("edits", o.toString()).apply()
     }
+
+    var booksFolder: String?
+        get() = p.getString("books", null)
+        set(v) { p.edit().putString("books", v).apply() }
+
+    fun pdfPage(uri: String): Int = p.getInt("pg_" + uri.hashCode(), 0)
+
+    fun setPdfPage(uri: String, pg: Int) {
+        p.edit().putInt("pg_" + uri.hashCode(), pg).apply()
+    }
+
+    fun loadBookMap(): Map<String, String> {
+        val out = HashMap<String, String>()
+        val o = JSONObject(p.getString("bookmap", "{}") ?: "{}")
+        for (k in o.keys()) out[k] = o.getString(k)
+        return out
+    }
+
+    fun saveBookMap(m: Map<String, String>) {
+        val o = JSONObject()
+        for ((k, v) in m) o.put(k, v)
+        p.edit().putString("bookmap", o.toString()).apply()
+    }
 }
